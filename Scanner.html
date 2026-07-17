@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Escanear código de barras</title>
+<style>
+  :root {
+    --color-tinta: #26362F;
+    --color-tinta-suave: #5C6B62;
+    --color-crate: #3E7D4C;
+    --color-crate-fondo: #E7F2E7;
+    --color-sello: #B23A2E;
+    --color-sello-fondo: #FBEAE7;
+    --color-papel: #EDEEE4;
+    --color-superficie: #FCFCF8;
+    --color-borde: #D9D9C9;
+    --radio: 12px;
+    --sombra: 0 2px 10px rgba(38, 54, 47, 0.10);
+    --fuente: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --fuente-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Courier New', monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: var(--color-papel); color: var(--color-tinta);
+    font-family: var(--fuente); min-height: 100vh;
+  }
+  .pantalla { padding: 20px 16px 40px; max-width: 480px; margin: 0 auto; }
+  .encabezado { text-align: center; margin-bottom: 16px; }
+  .encabezado h1 { font-size: 18px; font-weight: 800; margin: 0 0 4px; }
+  .encabezado p { font-size: 13px; color: var(--color-tinta-suave); margin: 0; }
+  #lector {
+    border-radius: var(--radio); overflow: hidden; box-shadow: var(--sombra);
+    border: 1px solid var(--color-borde); background: #000;
+  }
+  .estado {
+    margin-top: 14px; padding: 12px 14px; border-radius: var(--radio);
+    font-size: 13.5px; font-weight: 600; text-align: center;
+  }
+  .estado-espera { background: var(--color-superficie); color: var(--color-tinta-suave); border: 1px solid var(--color-borde); }
+  .estado-error { background: var(--color-sello-fondo); color: var(--color-sello); }
+  .estado-exito { background: var(--color-crate-fondo); color: var(--color-crate); }
+  .codigo-detectado {
+    font-family: var(--fuente-mono); font-size: 20px; font-weight: 700;
+    word-break: break-all; margin-top: 8px;
+  }
+  .btn {
+    display: block; width: 100%; padding: 16px 18px; margin-top: 12px; border: none;
+    border-radius: var(--radio); font-family: var(--fuente); font-size: 16px; font-weight: 700;
+    cursor: pointer; text-align: center;
+  }
+  .btn-primario { background: var(--color-tinta); color: #fff; }
+  .btn-secundario { background: var(--color-superficie); color: var(--color-tinta); border: 2px solid var(--color-borde); }
+  .oculto { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="pantalla">
+  <div class="encabezado">
+    <h1>📷 Escanear código de barras</h1>
+    <p>Apunta la cámara al código</p>
+  </div>
+
+  <div id="lector"></div>
+
+  <div id="estado" class="estado estado-espera">Iniciando cámara…</div>
+
+  <div id="resultado" class="oculto">
+    <div class="estado estado-exito">
+      Código detectado
+      <div id="codigo-texto" class="codigo-detectado"></div>
+    </div>
+    <button id="btn-usar" class="btn btn-primario">Usar este código</button>
+    <button id="btn-otra-vez" class="btn btn-secundario">Escanear otro</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+  // ---------- Configuración ----------
+  // Si esta página se abre con window.open() desde la app de Apps Script,
+  // el código se manda de vuelta con postMessage y esta pestaña se cierra sola.
+  // Si se abre navegando directamente (sin opener) y trae ?volver=URL en el
+  // enlace, se regresa a esa URL agregando ?codigo=XXXX al final.
+
+  const estadoEl = document.getElementById('estado');
+  const resultadoEl = document.getElementById('resultado');
+  const codigoTextoEl = document.getElementById('codigo-texto');
+  const btnUsar = document.getElementById('btn-usar');
+  const btnOtraVez = document.getElementById('btn-otra-vez');
+
+  let ultimoCodigo = null;
+  let escanerActivo = null;
+
+  function iniciarEscaner() {
+    resultadoEl.classList.add('oculto');
+    estadoEl.classList.remove('estado-error');
+    estadoEl.classList.add('estado-espera');
+    estadoEl.textContent = 'Iniciando cámara…';
+
+    escanerActivo = new Html5Qrcode('lector');
+    const config = { fps: 10, qrbox: { width: 260, height: 160 } };
+
+    escanerActivo.start(
+      { facingMode: 'environment' },
+      config,
+      (decodedText) => {
+        ultimoCodigo = decodedText;
+        escanerActivo.stop().catch(() => {});
+        codigoTextoEl.textContent = decodedText;
+        resultadoEl.classList.remove('oculto');
+        estadoEl.classList.add('oculto');
+      },
+      () => { /* fotograma sin código, se ignora */ }
+    ).catch((err) => {
+      estadoEl.classList.remove('estado-espera');
+      estadoEl.classList.add('estado-error');
+      estadoEl.textContent = 'No se pudo acceder a la cámara: ' + err;
+    });
+  }
+
+  function enviarCodigoDeVuelta(codigo) {
+    if (window.opener && !window.opener.closed) {
+      // Caso 1: se abrió con window.open() desde la app
+      window.opener.postMessage({ tipo: 'codigo-escaneado', codigo: codigo }, '*');
+      estadoEl.classList.remove('oculto', 'estado-error');
+      estadoEl.classList.add('estado-exito');
+      estadoEl.textContent = 'Código enviado. Cerrando…';
+      setTimeout(() => window.close(), 700);
+      return;
+    }
+
+    const params = new URLSearchParams(location.search);
+    const volver = params.get('volver');
+    if (volver) {
+      // Caso 2: se abrió navegando directamente, con ?volver=URL en el enlace
+      const separador = volver.includes('?') ? '&' : '?';
+      location.href = volver + separador + 'codigo=' + encodeURIComponent(codigo);
+      return;
+    }
+
+    // Caso 3: no hay forma de volver automáticamente, se muestra el código
+    // para copiarlo a mano.
+    estadoEl.classList.remove('oculto', 'estado-error');
+    estadoEl.classList.add('estado-exito');
+    estadoEl.textContent = 'Copia este código y pégalo en la app: ' + codigo;
+  }
+
+  btnUsar.addEventListener('click', () => {
+    if (ultimoCodigo) enviarCodigoDeVuelta(ultimoCodigo);
+  });
+
+  btnOtraVez.addEventListener('click', () => {
+    iniciarEscaner();
+  });
+
+  iniciarEscaner();
+</script>
+</body>
+</html>
