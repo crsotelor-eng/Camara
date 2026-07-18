@@ -73,7 +73,7 @@
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
   // ============================================================
-  // SONIDO DE CONFIRMACIÓN - Web Audio API
+  // SONIDO DE CAJA REGISTRADORA (Web Audio API)
   // ============================================================
   let contextoAudio = null;
   let audioListo = false;
@@ -91,34 +91,59 @@
   document.addEventListener('touchstart', inicializarAudio, { once: true });
   document.addEventListener('click', inicializarAudio, { once: true });
 
-  function reproducirBeep() {
+  function reproducirBeepCajaRegistradora() {
     if (!audioListo || !contextoAudio) return;
     try {
       if (contextoAudio.state === 'suspended') contextoAudio.resume();
       
       const ahora = contextoAudio.currentTime;
-      const osc = contextoAudio.createOscillator();
-      const gain = contextoAudio.createGain();
       
-      osc.connect(gain);
-      gain.connect(contextoAudio.destination);
+      // Tono 1: "Ding" agudo (campana de caja)
+      const osc1 = contextoAudio.createOscillator();
+      const gain1 = contextoAudio.createGain();
+      osc1.connect(gain1);
+      gain1.connect(contextoAudio.destination);
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(1200, ahora);
+      osc1.frequency.exponentialRampToValueAtTime(1800, ahora + 0.05);
+      gain1.gain.setValueAtTime(0.3, ahora);
+      gain1.gain.exponentialRampToValueAtTime(0.01, ahora + 0.12);
+      osc1.start(ahora);
+      osc1.stop(ahora + 0.12);
       
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(1500, ahora);
-      osc.frequency.exponentialRampToValueAtTime(800, ahora + 0.1);
+      // Tono 2: "Ca-ching" grave (cajón abriéndose)
+      const osc2 = contextoAudio.createOscillator();
+      const gain2 = contextoAudio.createGain();
+      osc2.connect(gain2);
+      gain2.connect(contextoAudio.destination);
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(200, ahora + 0.08);
+      osc2.frequency.exponentialRampToValueAtTime(80, ahora + 0.25);
+      gain2.gain.setValueAtTime(0, ahora + 0.08);
+      gain2.gain.linearRampToValueAtTime(0.25, ahora + 0.10);
+      gain2.gain.exponentialRampToValueAtTime(0.01, ahora + 0.30);
+      osc2.start(ahora + 0.08);
+      osc2.stop(ahora + 0.30);
       
-      gain.gain.setValueAtTime(0.4, ahora);
-      gain.gain.exponentialRampToValueAtTime(0.01, ahora + 0.15);
+      // Tono 3: "Click" metálico final
+      const osc3 = contextoAudio.createOscillator();
+      const gain3 = contextoAudio.createGain();
+      osc3.connect(gain3);
+      gain3.connect(contextoAudio.destination);
+      osc3.type = 'square';
+      osc3.frequency.setValueAtTime(800, ahora + 0.22);
+      gain3.gain.setValueAtTime(0.15, ahora + 0.22);
+      gain3.gain.exponentialRampToValueAtTime(0.01, ahora + 0.28);
+      osc3.start(ahora + 0.22);
+      osc3.stop(ahora + 0.28);
       
-      osc.start(ahora);
-      osc.stop(ahora + 0.15);
     } catch (e) {
       // silencioso si falla
     }
   }
 
   // ============================================================
-  // LÓGICA DEL ESCANER - ENVÍO INMEDIATO SIN CONFIRMACIÓN
+  // LÓGICA DEL ESCANER - ENVÍO INMEDIATO SIN PAUSA NI CONFIRMACIÓN
   // ============================================================
   const estadoEl = document.getElementById('estado');
   const btnManual = document.getElementById('btn-manual');
@@ -144,20 +169,20 @@
         if (yaDetectado) return;
         yaDetectado = true;
 
-        // 🔊 BEEP INMEDIATO
-        reproducirBeep();
+        // 🔊 SONIDO DE CAJA REGISTRADORA
+        reproducirBeepCajaRegistradora();
 
         // Enviar código a la app principal INMEDIATAMENTE
         enviarCodigoDeVuelta(decodedText);
 
-        // Cerrar esta ventana automáticamente (sin mostrar confirmación)
+        // Cerrar esta ventana automáticamente (sin mostrar nada)
         setTimeout(() => {
           if (escanerActivo) {
             escanerActivo.stop().catch(() => {}).then(() => window.close());
           } else {
             window.close();
           }
-        }, 300);
+        }, 200);
       },
       () => { /* sin código en este fotograma */ }
     ).catch((err) => {
@@ -191,9 +216,9 @@
     const codigo = prompt('Ingresa el código manualmente:');
     if (codigo && codigo.trim()) {
       yaDetectado = true;
-      reproducirBeep();
+      reproducirBeepCajaRegistradora();
       enviarCodigoDeVuelta(codigo.trim());
-      setTimeout(() => window.close(), 300);
+      setTimeout(() => window.close(), 200);
     }
   });
 
