@@ -39,18 +39,21 @@
   }
   .estado-espera { background: var(--color-superficie); color: var(--color-tinta-suave); border: 1px solid var(--color-borde); }
   .estado-error { background: var(--color-sello-fondo); color: var(--color-sello); }
+  .estado-exito { background: var(--color-crate-fondo); color: var(--color-crate); }
+  .codigo-detectado {
+    font-family: var(--fuente-mono); font-size: 20px; font-weight: 700;
+    word-break: break-all; margin-top: 8px;
+  }
   .btn {
-    display: block; width: 100%; padding: 16px 18px; margin-top: 12px; border: none;
-    border-radius: var(--radio); font-family: var(--fuente); font-size: 16px; font-weight: 700;
+    display: block; width: 100%; padding: 16px 18px; margin-top: 10px; border: none;
+    border-radius: var(--radio); font-family: var(--fuente); font-size: 15px; font-weight: 700;
     cursor: pointer; text-align: center;
   }
   .btn-primario { background: var(--color-tinta); color: #fff; }
   .btn-secundario { background: var(--color-superficie); color: var(--color-tinta); border: 2px solid var(--color-borde); }
-  .btn-manual {
-    display: block; width: 100%; padding: 10px; margin-top: 8px; border: none;
-    background: transparent; color: var(--color-tinta-suave); font-family: var(--fuente);
-    font-size: 13px; font-weight: 600; cursor: pointer; text-align: center;
-    text-decoration: underline;
+  .btn-volver { background: var(--color-sello-fondo); color: var(--color-sello); border: 2px solid var(--color-sello); }
+  .botones-fijos {
+    margin-top: 14px;
   }
   .oculto { display: none !important; }
 </style>
@@ -60,14 +63,25 @@
 <div class="pantalla">
   <div class="encabezado">
     <h1>📷 Escanear código de barras</h1>
-    <p>Apunta la cámara al código</p>
+    <p id="texto-instruccion">Apunta la cámara al código</p>
   </div>
 
   <div id="lector"></div>
 
   <div id="estado" class="estado estado-espera">Iniciando cámara…</div>
 
-  <button id="btn-manual" class="btn-manual oculto">¿No se pudo escanear? Ingresar código manualmente</button>
+  <div id="resultado" class="oculto">
+    <div class="estado estado-exito">
+      ✅ Código detectado
+      <div id="codigo-texto" class="codigo-detectado"></div>
+    </div>
+  </div>
+
+  <!-- BOTONES FIJOS SIEMPRE VISIBLES -->
+  <div class="botones-fijos">
+    <button id="btn-manual" class="btn btn-secundario">✏️ Ingresar código manualmente</button>
+    <button id="btn-volver" class="btn btn-volver">← Volver a la app</button>
+  </div>
 </div>
 
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
@@ -98,7 +112,7 @@
       
       const ahora = contextoAudio.currentTime;
       
-      // Tono 1: "Ding" agudo (campana de caja)
+      // "Ding" agudo
       const osc1 = contextoAudio.createOscillator();
       const gain1 = contextoAudio.createGain();
       osc1.connect(gain1);
@@ -111,7 +125,7 @@
       osc1.start(ahora);
       osc1.stop(ahora + 0.12);
       
-      // Tono 2: "Ca-ching" grave (cajón abriéndose)
+      // "Ca-ching" grave
       const osc2 = contextoAudio.createOscillator();
       const gain2 = contextoAudio.createGain();
       osc2.connect(gain2);
@@ -125,7 +139,7 @@
       osc2.start(ahora + 0.08);
       osc2.stop(ahora + 0.30);
       
-      // Tono 3: "Click" metálico final
+      // "Click" metálico
       const osc3 = contextoAudio.createOscillator();
       const gain3 = contextoAudio.createGain();
       osc3.connect(gain3);
@@ -137,27 +151,41 @@
       osc3.start(ahora + 0.22);
       osc3.stop(ahora + 0.28);
       
-    } catch (e) {
-      // silencioso si falla
-    }
+    } catch (e) {}
   }
 
   // ============================================================
-  // LÓGICA DEL ESCANER - ENVÍO INMEDIATO SIN PAUSA NI CONFIRMACIÓN
+  // LÓGICA DEL ESCANER
   // ============================================================
   const estadoEl = document.getElementById('estado');
+  const resultadoEl = document.getElementById('resultado');
+  const codigoTextoEl = document.getElementById('codigo-texto');
+  const textoInstruccionEl = document.getElementById('texto-instruccion');
   const btnManual = document.getElementById('btn-manual');
+  const btnVolver = document.getElementById('btn-volver');
 
   let escanerActivo = null;
   let yaDetectado = false;
 
   function iniciarEscaner() {
     yaDetectado = false;
-    btnManual.classList.add('oculto');
+    resultadoEl.classList.add('oculto');
     estadoEl.classList.remove('estado-error', 'oculto');
     estadoEl.classList.add('estado-espera');
     estadoEl.textContent = 'Iniciando cámara…';
+    textoInstruccionEl.textContent = 'Apunta la cámara al código';
 
+    if (escanerActivo) {
+      escanerActivo.stop().catch(() => {}).then(() => {
+        escanerActivo.clear();
+        crearNuevoEscaner();
+      });
+    } else {
+      crearNuevoEscaner();
+    }
+  }
+
+  function crearNuevoEscaner() {
     escanerActivo = new Html5Qrcode('lector');
     const config = { fps: 10, qrbox: { width: 260, height: 160 } };
 
@@ -165,66 +193,96 @@
       { facingMode: 'environment' },
       config,
       (decodedText) => {
-        // Evitar lecturas múltiples
         if (yaDetectado) return;
         yaDetectado = true;
 
-        // 🔊 SONIDO DE CAJA REGISTRADORA
+        // 🔊 SONIDO CAJA REGISTRADORA
         reproducirBeepCajaRegistradora();
 
-        // Enviar código a la app principal INMEDIATAMENTE
+        // Mostrar breve confirmación
+        codigoTextoEl.textContent = decodedText;
+        resultadoEl.classList.remove('oculto');
+        estadoEl.classList.add('oculto');
+        textoInstruccionEl.textContent = 'Código detectado';
+
+        // Enviar a la app principal
         enviarCodigoDeVuelta(decodedText);
 
-        // Cerrar esta ventana automáticamente (sin mostrar nada)
+        // Reanudar escáner automáticamente después de 1 segundo
         setTimeout(() => {
+          resultadoEl.classList.add('oculto');
+          estadoEl.classList.remove('oculto');
+          estadoEl.classList.add('estado-espera');
+          estadoEl.textContent = 'Apunta al siguiente código';
+          yaDetectado = false;
           if (escanerActivo) {
-            escanerActivo.stop().catch(() => {}).then(() => window.close());
-          } else {
-            window.close();
+            try { escanerActivo.resume(); } catch (e) { iniciarEscaner(); }
           }
-        }, 200);
+        }, 1000);
       },
-      () => { /* sin código en este fotograma */ }
+      () => { /* sin código */ }
     ).catch((err) => {
       estadoEl.classList.remove('estado-espera');
       estadoEl.classList.add('estado-error');
       estadoEl.textContent = 'No se pudo acceder a la cámara: ' + err;
-      btnManual.classList.remove('oculto');
     });
   }
 
   function enviarCodigoDeVuelta(codigo) {
     if (window.opener && !window.opener.closed) {
       window.opener.postMessage({ tipo: 'codigo-escaneado', codigo: codigo }, '*');
-      return;
     }
-    const params = new URLSearchParams(location.search);
-    const volver = params.get('volver');
-    if (volver) {
-      const separador = volver.includes('?') ? '&' : '?';
-      location.href = volver + separador + 'codigo=' + encodeURIComponent(codigo);
-      return;
-    }
-    estadoEl.classList.remove('oculto');
-    estadoEl.classList.add('estado-error');
-    estadoEl.textContent = 'No se detectó la app de destino. Copia manualmente: ' + codigo;
-    btnManual.classList.remove('oculto');
   }
 
-  // Botón manual desde el escáner
+  // Botón "Ingresar código manualmente"
   btnManual.addEventListener('click', function() {
     const codigo = prompt('Ingresa el código manualmente:');
     if (codigo && codigo.trim()) {
       yaDetectado = true;
       reproducirBeepCajaRegistradora();
       enviarCodigoDeVuelta(codigo.trim());
-      setTimeout(() => window.close(), 200);
+      
+      // Mostrar breve confirmación y reanudar
+      codigoTextoEl.textContent = codigo.trim();
+      resultadoEl.classList.remove('oculto');
+      estadoEl.classList.add('oculto');
+      textoInstruccionEl.textContent = 'Código ingresado manualmente';
+      
+      setTimeout(() => {
+        resultadoEl.classList.add('oculto');
+        estadoEl.classList.remove('oculto');
+        estadoEl.classList.add('estado-espera');
+        estadoEl.textContent = 'Apunta al siguiente código';
+        yaDetectado = false;
+        if (escanerActivo) {
+          try { escanerActivo.resume(); } catch (e) { iniciarEscaner(); }
+        }
+      }, 1000);
     }
+  });
+
+  // Botón "Volver a la app"
+  btnVolver.addEventListener('click', function() {
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({ tipo: 'cerrar-escaner' }, '*');
+    }
+    window.close();
   });
 
   // Escuchar mensajes de la app principal
   window.addEventListener('message', function (evento) {
     if (!evento.data) return;
+    if (evento.data.tipo === 'continuar-escaneo') {
+      // Reanudar escáner
+      yaDetectado = false;
+      resultadoEl.classList.add('oculto');
+      estadoEl.classList.remove('oculto');
+      estadoEl.classList.add('estado-espera');
+      estadoEl.textContent = 'Apunta al siguiente código';
+      if (escanerActivo) {
+        try { escanerActivo.resume(); } catch (e) { iniciarEscaner(); }
+      }
+    }
     if (evento.data.tipo === 'cerrar-escaner') {
       if (escanerActivo) {
         escanerActivo.stop().catch(() => {}).then(() => window.close());
