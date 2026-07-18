@@ -51,6 +51,12 @@
   }
   .btn-primario { background: var(--color-tinta); color: #fff; }
   .btn-secundario { background: var(--color-superficie); color: var(--color-tinta); border: 2px solid var(--color-borde); }
+  .btn-manual {
+    display: block; width: 100%; padding: 10px; margin-top: 8px; border: none;
+    background: transparent; color: var(--color-tinta-suave); font-family: var(--fuente);
+    font-size: 13px; font-weight: 600; cursor: pointer; text-align: center;
+    text-decoration: underline;
+  }
   .oculto { display: none !important; }
 </style>
 </head>
@@ -59,7 +65,7 @@
 <div class="pantalla">
   <div class="encabezado">
     <h1>📷 Escanear código de barras</h1>
-    <p>Apunta la cámara al código</p>
+    <p id="texto-instruccion">Apunta la cámara al código</p>
   </div>
 
   <div id="lector"></div>
@@ -68,37 +74,100 @@
 
   <div id="resultado" class="oculto">
     <div class="estado estado-exito">
-      Código detectado
+      ✅ Código detectado
       <div id="codigo-texto" class="codigo-detectado"></div>
     </div>
-    <button id="btn-usar" class="btn btn-primario">Usar este código</button>
-    <button id="btn-otra-vez" class="btn btn-secundario">Escanear otro</button>
+    <button id="btn-otra-vez" class="btn btn-secundario">Escanear otro código</button>
   </div>
+  
+  <button id="btn-manual" class="btn-manual oculto">¿No se pudo escanear? Ingresar código manualmente</button>
 </div>
 
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
-  // ---------- Configuración ----------
-  // Si esta página se abre con window.open() desde la app de Apps Script,
-  // el código se manda de vuelta con postMessage y esta pestaña se cierra sola.
-  // Si se abre navegando directamente (sin opener) y trae ?volver=URL en el
-  // enlace, se regresa a esa URL agregando ?codigo=XXXX al final.
+  // ============================================================
+  // SONIDO DE CONFIRMACIÓN - Web Audio API
+  // Se inicializa en la PRIMERA interacción del usuario (requerido por
+  // políticas de autoplay de Chrome/Safari en móviles)
+  // ============================================================
+  let contextoAudio = null;
+  let audioListo = false;
 
+  function inicializarAudio() {
+    if (audioListo) return;
+    try {
+      contextoAudio = new (window.AudioContext || window.webkitAudioContext)();
+      audioListo = true;
+    } catch (e) {
+      console.log('Audio no disponible');
+    }
+  }
+
+  // Escuchar cualquier toque para desbloquear el audio
+  document.addEventListener('touchstart', inicializarAudio, { once: true });
+  document.addEventListener('click', inicializarAudio, { once: true });
+
+  function reproducirBeep() {
+    if (!audioListo || !contextoAudio) return;
+    try {
+      if (contextoAudio.state === 'suspended') contextoAudio.resume();
+      
+      const ahora = contextoAudio.currentTime;
+      const osc = contextoAudio.createOscillator();
+      const gain = contextoAudio.createGain();
+      
+      osc.connect(gain);
+      gain.connect(contextoAudio.destination);
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1500, ahora);        // tono agudo
+      osc.frequency.exponentialRampToValueAtTime(800, ahora + 0.1);
+      
+      gain.gain.setValueAtTime(0.4, ahora);
+      gain.gain.exponentialRampToValueAtTime(0.01, ahora + 0.15);
+      
+      osc.start(ahora);
+      osc.stop(ahora + 0.15);
+    } catch (e) {
+      // silencioso si falla
+    }
+  }
+
+  // ============================================================
+  // LÓGICA DEL ESCANER
+  // ============================================================
   const estadoEl = document.getElementById('estado');
   const resultadoEl = document.getElementById('resultado');
   const codigoTextoEl = document.getElementById('codigo-texto');
-  const btnUsar = document.getElementById('btn-usar');
   const btnOtraVez = document.getElementById('btn-otra-vez');
+  const btnManual = document.getElementById('btn-manual');
+  const textoInstruccionEl = document.getElementById('texto-instruccion');
 
-  let ultimoCodigo = null;
   let escanerActivo = null;
+  let codigoDetectado = '';
 
   function iniciarEscaner() {
+    // Resetear UI
     resultadoEl.classList.add('oculto');
-    estadoEl.classList.remove('estado-error');
+    btnManual.classList.add('oculto');
+    estadoEl.classList.remove('estado-error', 'oculto');
     estadoEl.classList.add('estado-espera');
     estadoEl.textContent = 'Iniciando cámara…';
+    textoInstruccionEl.textContent = 'Apunta la cámara al código';
+    codigoDetectado = '';
 
+    // Si ya hay un escáner, limpiarlo primero
+    if (escanerActivo) {
+      escanerActivo.stop().catch(() => {}).then(() => {
+        escanerActivo.clear();
+        crearNuevoEscaner();
+      });
+    } else {
+      crearNuevoEscaner();
+    }
+  }
+
+  function crearNuevoEscaner() {
     escanerActivo = new Html5Qrcode('lector');
     const config = { fps: 10, qrbox: { width: 260, height: 160 } };
 
@@ -106,55 +175,102 @@
       { facingMode: 'environment' },
       config,
       (decodedText) => {
-        ultimoCodigo = decodedText;
-        escanerActivo.stop().catch(() => {});
+        // Evitar lecturas múltiples del mismo código
+        if (codigoDetectado) return;
+        codigoDetectado = decodedText;
+
+        // 🔊 BEEP INMEDIATO al detectar código
+        reproducirBeep();
+
+        // PAUSAR (no detener) la cámara para mantenerla viva
+        escanerActivo.pause(true);
+
+        // Mostrar resultado
         codigoTextoEl.textContent = decodedText;
         resultadoEl.classList.remove('oculto');
         estadoEl.classList.add('oculto');
+        textoInstruccionEl.textContent = 'Código detectado';
+        btnManual.classList.remove('oculto');
+
+        // Enviar a la app principal INMEDIATAMENTE
+        enviarCodigoDeVuelta(decodedText);
       },
-      () => { /* fotograma sin código, se ignora */ }
+      () => { /* sin código en este fotograma */ }
     ).catch((err) => {
       estadoEl.classList.remove('estado-espera');
       estadoEl.classList.add('estado-error');
       estadoEl.textContent = 'No se pudo acceder a la cámara: ' + err;
+      btnManual.classList.remove('oculto');
     });
+  }
+
+  function reanudarEscaner() {
+    codigoDetectado = '';
+    resultadoEl.classList.add('oculto');
+    estadoEl.classList.remove('oculto', 'estado-error');
+    estadoEl.classList.add('estado-espera');
+    estadoEl.textContent = 'Listo, apunta al siguiente código';
+    textoInstruccionEl.textContent = 'Apunta la cámara al código';
+
+    if (escanerActivo) {
+      try {
+        escanerActivo.resume();
+        return;
+      } catch (e) {
+        // si falla resume, reiniciar
+      }
+    }
+    iniciarEscaner();
   }
 
   function enviarCodigoDeVuelta(codigo) {
     if (window.opener && !window.opener.closed) {
-      // Caso 1: se abrió con window.open() desde la app
       window.opener.postMessage({ tipo: 'codigo-escaneado', codigo: codigo }, '*');
-      estadoEl.classList.remove('oculto', 'estado-error');
-      estadoEl.classList.add('estado-exito');
-      estadoEl.textContent = 'Código enviado. Cerrando…';
-      setTimeout(() => window.close(), 700);
       return;
     }
-
     const params = new URLSearchParams(location.search);
     const volver = params.get('volver');
     if (volver) {
-      // Caso 2: se abrió navegando directamente, con ?volver=URL en el enlace
       const separador = volver.includes('?') ? '&' : '?';
       location.href = volver + separador + 'codigo=' + encodeURIComponent(codigo);
       return;
     }
-
-    // Caso 3: no hay forma de volver automáticamente, se muestra el código
-    // para copiarlo a mano.
-    estadoEl.classList.remove('oculto', 'estado-error');
-    estadoEl.classList.add('estado-exito');
-    estadoEl.textContent = 'Copia este código y pégalo en la app: ' + codigo;
+    estadoEl.classList.remove('oculto');
+    estadoEl.classList.add('estado-error');
+    estadoEl.textContent = 'No se detectó la app de destino. Copia manualmente: ' + codigo;
+    btnManual.classList.remove('oculto');
   }
 
-  btnUsar.addEventListener('click', () => {
-    if (ultimoCodigo) enviarCodigoDeVuelta(ultimoCodigo);
+  // Botón "Escanear otro"
+  btnOtraVez.addEventListener('click', reanudarEscaner);
+
+  // Botón "Ingresar código manualmente" desde el escáner
+  btnManual.addEventListener('click', function() {
+    const codigo = prompt('Ingresa el código manualmente:');
+    if (codigo && codigo.trim()) {
+      codigoDetectado = codigo.trim();
+      reproducirBeep();
+      enviarCodigoDeVuelta(codigoDetectado);
+      codigoTextoEl.textContent = codigoDetectado;
+      resultadoEl.classList.remove('oculto');
+      estadoEl.classList.add('oculto');
+    }
   });
 
-  btnOtraVez.addEventListener('click', () => {
-    iniciarEscaner();
+  // Escuchar mensajes de la app principal
+  window.addEventListener('message', function (evento) {
+    if (!evento.data) return;
+    if (evento.data.tipo === 'continuar-escaneo') reanudarEscaner();
+    if (evento.data.tipo === 'cerrar-escaner') {
+      if (escanerActivo) {
+        escanerActivo.stop().catch(() => {}).then(() => window.close());
+      } else {
+        window.close();
+      }
+    }
   });
 
+  // Iniciar al cargar
   iniciarEscaner();
 </script>
 </body>
